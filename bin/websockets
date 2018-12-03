@@ -10,6 +10,8 @@ if [[ "${trace:=0}" -eq 1 ]];then
   export trace
 fi
 trap 'status="$?"; echo "$(basename $0): status:${status} LINENO:${LINENO} BASH_LINENO:${BASH_LINENO} command:${BASH_COMMAND} functions:$(printf " %s" ${FUNCNAME[@]:-})"; exit ${status}' ERR
+# * <https://tools.ietf.org/html/rfc6455#section-5>
+
 
 function terminate() {
   pid="$1"
@@ -61,7 +63,6 @@ Origin: http://www.websocket.org
 Sec-WebSocket-Version: 13
 Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==
 Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
-
 " 
 
 
@@ -70,15 +71,15 @@ Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
     : ${ping_interval:=10}
     while true; do
       if ${timeout_cmd} ${pong_timeout} grep 'hello' ${ws_pipe} >/dev/null;then
-        log "got hello command"
+        # log "sleep ${ping_interval}"
         # sleep ${ping_interval} 
-        echo -ne "hello hello\n\n"
+        log "send hello command"
+        echo -en "\x89\x07hello\n\r" | tee >(xxd >&2)
       fi 
     done
     log "exit"
     exit 1
   fi
-
 
 # ws server response
 # HTTP/1.1 101 Web Socket Protocol Handshake
@@ -103,23 +104,35 @@ elif [[ "$1" == "main" ]];then shift
   trap "log 'remove pipe: ${ws_pipe}'; rm ${ws_pipe}" EXIT 
   
   ${0} ws_socat \
-  | ${0} send_hello_or_pong_to_file ${ws_pipe}
+  | ${0} send_hello_or_pong_to_file ${ws_pipe} 
+  #   \
+  # | xxd
 
 elif [[ "$1" == "send_hello_or_pong_to_file" ]];then shift
   file="$1"; shift
+  # while read -r line; do
+  #   # if grep 'HTTP/1.1 101 Web Socket Protocol Handshake' <<<"${line}" >/dev/null ;then
+  #   if grep '^$' <<<"${line}" >/dev/null ;then
+  #     log "got new line"
+  #     echo "hello" > ${file}
+  #   fi
+  #   if grep 'Upgrade: websocket' <<<"${line}" >/dev/null ;then
+  #     log "got handshake"
+  #   fi
+  #   echo "$line" | xxd
+  # done
   while read -r line; do
-
-
-    # if grep 'HTTP/1.1 101 Web Socket Protocol Handshake' <<<"${line}" >/dev/null ;then
     if grep '^$' <<<"${line}" >/dev/null ;then
-      log "got new line"
+      log "got all headers"
       echo "hello" > ${file}
+      break
     fi
-    if grep 'Upgrade: websocket' <<<"${line}" >/dev/null ;then
-      log "got handshake"
-    fi
-    echo "$line"
   done
+  # log "xxd"
+  xxd -g0 -c1
+  # while read -n1 char; do
+  #   echo -n "${char}" | xxd
+  # done
 
 elif [[ "$1" == "ws_socat" ]];then shift
   : ${host:="echo.websocket.org"}
@@ -130,11 +143,12 @@ elif [[ "$1" == "ws_socat" ]];then shift
     log "connecting ${host} ${path}"
     ${0} ws_headers ${host} ${path} \
     | socat \
-      -vvvv \
       STDIO \
-      OPENSSL:${host}:443,ignoreeof,crnl \
+      OPENSSL:${host}:443,crnl \
      || true 
   done
+      # -vvvv \
+      # OPENSSL:${host}:443,ignoreeof,crnl \
 
 elif [[ "$1" == "ws_curl" ]];then shift
   : ${host:="echo.websocket.org:443"}
