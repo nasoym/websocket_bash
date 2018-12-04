@@ -12,17 +12,25 @@ fi
 trap 'status="$?"; echo "$(basename $0): status:${status} LINENO:${LINENO} BASH_LINENO:${BASH_LINENO} command:${BASH_COMMAND} functions:$(printf " %s" ${FUNCNAME[@]:-})"; exit ${status}' ERR
 # * <https://tools.ietf.org/html/rfc6455#section-5>
 
-
+function log() {
+  echo -e "\e[0;37m$(date +%H:%M) $@\e[0m" >&2
+}
 function terminate() {
   pid="$1"
   # for child_pid in $( ps --no-headers --ppid $1 -o pid ); do
   for child_pid in $(ps -o ppid,pid  | sed '1d' | awk -v "ppid=${pid}" '{if ($1==ppid){print $2}}'); do
     echo "kill parent:$1 child: $child_pid"
-    kill -9 $child_pid &
+    kill $child_pid &
     terminate $child_pid
   done
 }
-trap 'terminate $$' INT TERM
+function close() {
+  log "close: $$ !!"
+  pstree $$
+  terminate $$
+}
+# trap 'close' INT TERM
+trap 'close' INT 
 
 self="$(cd $(dirname "${BASH_SOURCE[0]}") && pwd -P)/$(basename "$0")"
 self_path="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -33,10 +41,8 @@ while getopts "a:h?" options; do case $options in
 esac; done; shift $((OPTIND - 1))
 
 : ${host:="echo.websocket.org"}
+: ${path:="/"}
 
-function log() {
-  echo -e "\e[0;37m$(date +%H:%M) $@\e[0m" >&2
-}
   if which timeout >/dev/null ; then
     timeout_cmd="timeout"
   elif which gtimeout >/dev/null ; then
@@ -49,7 +55,27 @@ if [[ "$#" -eq 0 ]];then
 elif [[ "$1" == "help" ]];then shift
   which bash_scripts >/dev/null && bash_scripts show_commands ${0} || true
 
-elif [[ "$1" == "ws_headers" ]];then shift
+elif [[ "$1" == "main" ]];then shift
+  ws_pipe="$(mktemp -u)"
+  mkfifo ${ws_pipe}
+  log "created pipe: ${ws_pipe}"
+  trap "log 'remove pipe: ${ws_pipe}'; rm -f ${ws_pipe}" EXIT 
+  
+  log "connecting ${host} ${path}"
+  { \
+    ${0} print_websocket_request_headers ${host} ${path}; \
+    ${0} send_message_from_pipe ${ws_pipe}; \
+  } \
+  | socat STDIO OPENSSL:${host}:443,crnl \
+  | { \
+    ${0} parse_response_headers; \
+    echo -en "\x89\x07hello\n\r" > ${ws_pipe}; \
+    xxd -g0 -c1; \
+  }
+  # -vvvv \
+  # OPENSSL:${host}:443,ignoreeof,crnl \
+
+elif [[ "$1" == "print_websocket_request_headers" ]];then shift
   host="$1"; shift
   path="$1"; shift
   echo "\
@@ -65,179 +91,22 @@ Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==
 Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
 " 
 
-
-  if [[ -p "${ws_pipe}" ]];then
-    : ${pong_timeout:=20}
-    : ${ping_interval:=10}
+elif [[ "$1" == "send_message_from_pipe" ]];then shift
+  file="$1"; shift
+  if [[ -p "${file}" ]];then
     while true; do
-      if ${timeout_cmd} ${pong_timeout} grep 'hello' ${ws_pipe} >/dev/null;then
-        # log "sleep ${ping_interval}"
-        # sleep ${ping_interval} 
-        log "send hello command"
-        echo -en "\x89\x07hello\n\r" | tee >(xxd >&2)
-      fi 
+      log "send from pipe ${file}: "
+      cat ${file} | tee >(xxd >&2)
     done
-    log "exit"
-    exit 1
   fi
 
-# ws server response
-# HTTP/1.1 101 Web Socket Protocol Handshake
-# Access-Control-Allow-Credentials: true
-# Access-Control-Allow-Headers: content-type
-# Access-Control-Allow-Headers: authorization
-# Access-Control-Allow-Headers: x-websocket-extensions
-# Access-Control-Allow-Headers: x-websocket-version
-# Access-Control-Allow-Headers: x-websocket-protocol
-# Access-Control-Allow-Origin: http://www.websocket.org
-# Connection: Upgrade
-# Date: Thu, 29 Nov 2018 12:03:12 GMT
-# Sec-WebSocket-Accept: Qw5667ia0q27TEnIGy5uiLiNWHg=
-# Server: Kaazing Gateway
-# Upgrade: websocket
-
-elif [[ "$1" == "main" ]];then shift
-  ws_pipe="$(mktemp -u)"
-  mkfifo ${ws_pipe}
-  log "create pipe: ${ws_pipe}"
-  export ws_pipe
-  trap "log 'remove pipe: ${ws_pipe}'; rm ${ws_pipe}" EXIT 
-  
-  ${0} ws_socat \
-  | ${0} send_hello_or_pong_to_file ${ws_pipe} 
-  #   \
-  # | xxd
-
-elif [[ "$1" == "send_hello_or_pong_to_file" ]];then shift
-  file="$1"; shift
-  # while read -r line; do
-  #   # if grep 'HTTP/1.1 101 Web Socket Protocol Handshake' <<<"${line}" >/dev/null ;then
-  #   if grep '^$' <<<"${line}" >/dev/null ;then
-  #     log "got new line"
-  #     echo "hello" > ${file}
-  #   fi
-  #   if grep 'Upgrade: websocket' <<<"${line}" >/dev/null ;then
-  #     log "got handshake"
-  #   fi
-  #   echo "$line" | xxd
-  # done
+elif [[ "$1" == "parse_response_headers" ]];then shift
   while read -r line; do
     if grep '^$' <<<"${line}" >/dev/null ;then
       log "got all headers"
-      echo "hello" > ${file}
       break
     fi
   done
-  # log "xxd"
-  xxd -g0 -c1
-  # while read -n1 char; do
-  #   echo -n "${char}" | xxd
-  # done
-
-elif [[ "$1" == "ws_socat" ]];then shift
-  : ${host:="echo.websocket.org"}
-  : ${path:="/"}
-  trap 'echo "trap rtm 2" >&2; exit' TERM INT
-
-  while true; do
-    log "connecting ${host} ${path}"
-    ${0} ws_headers ${host} ${path} \
-    | socat \
-      STDIO \
-      OPENSSL:${host}:443,crnl \
-     || true 
-  done
-      # -vvvv \
-      # OPENSSL:${host}:443,ignoreeof,crnl \
-
-elif [[ "$1" == "ws_curl" ]];then shift
-  : ${host:="echo.websocket.org:443"}
-  : ${path:="/"}
-  curl -vvv --silent --no-buffer \
-    -H "Connection: Upgrade" \
-    -H "Upgrade: websocket" \
-    -H "Sec-WebSocket-Version: 13" \
-    -H "Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==" \
-    -H "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits" \
-    "https://${host}${path}"
-  
-
-# elif [[ "$1" == "curl" ]];then shift
-#   # -H "Host: echo.websocket.org" \
-#   # -H "Origin: http://www.websocket.org" \
-#   curl -vvv --silent --no-buffer \
-#     -H "Connection: Upgrade" \
-#     -H "Upgrade: websocket" \
-#     -H "Sec-WebSocket-Version: 13" \
-#     -H "Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==" \
-#     -H "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits" \
-#     "https://${host}"
-#
-# elif [[ "$1" == "socat_ws" ]];then shift
-#
-# echo -e "\
-# GET / HTTP/1.1\r
-# Host: echo.websocket.org\r
-# User-Agent: curl/7.54.0\r
-# Accept: */*\r
-# Connection: Upgrade\r
-# Upgrade: websocket\r
-# Origin: http://www.websocket.org\r
-# Sec-WebSocket-Version: 13\r
-# Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==\r
-# Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r
-# \r\n\r\n" \
-#  | socat - OPENSSL:${host}:443
-#
-# elif [[ "$1" == "foo" ]];then shift
-#   input="$(cat)"
-#   echo "FOO foo"
-#   echo "-${input}-"
-#
-# elif [[ "$1" == "ws_headers" ]];then shift
-#   echo -n -e "\
-#   GET / HTTP/1.1
-#   Host: echo.websocket.org
-#   User-Agent: curl/7.54.0
-#   Accept: */*
-#   Connection: Upgrade
-#   Upgrade: websocket
-#   Origin: http://www.websocket.org
-#   Sec-WebSocket-Version: 13
-#   Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==
-#   Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
-#   \n\n"
-#   # cat
-#
-# elif [[ "$1" == "socat_test" ]];then shift
-#
-# # socat ${socat_options} TCP-LISTEN:${port},reuseaddr,fork SYSTEM:handle
-# # socat ${socat_options} TCP-LISTEN:${port},reuseaddr,fork EXEC:"/bin/bash -c handle"
-#
-#
-# # ^Cgit_repos:seq 1 4 | socat SYSTEM:"grep 1" -
-#
-#   # date | socat STDIO EXEC:"${0} foo" 
-#   # date | socat EXEC:"${0} foo" STDIO 
-#   # date | socat EXEC:"${0} foo" -
-#   # date | socat -u EXEC:"${0} foo" -
-#   # socat -u EXEC:"${0} foo",ignoreeof TCP:localhost:9090
-#
-#   # socat -u EXEC:"${0} ws_headers",ignoreeof OPENSSL:${host}:443
-#   # socat -u EXEC:"${0} ws_headers",ignoreeof TCP:localhost:9090
-#   socat -vvvv -u EXEC:"${0} ws_headers",ignoreeof OPENSSL:${host}:443,crnl
-#
-#
-# elif [[ "$1" == "socat_http" ]];then shift
-#   : ${host:="www.startpage.com"}
-#
-# echo -e "\
-# GET / HTTP/1.1\r
-# Host: www.startpage.com\r
-# User-Agent: curl/7.52.1\r
-# Accept: */*\r
-# \r\n\r\n" \
-#  | socat -vvvv - OPENSSL:${host}:443
 
 else
   echo "unknown command: $@" >&2
