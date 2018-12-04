@@ -13,14 +13,15 @@ trap 'status="$?"; echo "$(basename $0): status:${status} LINENO:${LINENO} BASH_
 # * <https://tools.ietf.org/html/rfc6455#section-5>
 
 function log() {
-  echo -e "\e[0;37m$(date +%H:%M) $@\e[0m" >&2
+  echo -e "\e[1;37m$(date +%H:%M) $@\e[0m" >&2
+  # echo -e "\e[0;37m$(date +%H:%M) $@\e[0m" >&2
 }
 function terminate() {
   pid="$1"
   # for child_pid in $( ps --no-headers --ppid $1 -o pid ); do
   for child_pid in $(ps -o ppid,pid  | sed '1d' | awk -v "ppid=${pid}" '{if ($1==ppid){print $2}}'); do
     echo "kill parent:$1 child: $child_pid"
-    kill $child_pid &
+    kill -9 $child_pid &
     terminate $child_pid
   done
 }
@@ -30,7 +31,7 @@ function close() {
   terminate $$
 }
 # trap 'close' INT TERM
-trap 'close' INT 
+trap 'close' INT TERM
 
 self="$(cd $(dirname "${BASH_SOURCE[0]}") && pwd -P)/$(basename "$0")"
 self_path="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -70,10 +71,30 @@ elif [[ "$1" == "main" ]];then shift
   | { \
     ${0} parse_response_headers; \
     echo -en "\x89\x07hello\n\r" > ${ws_pipe}; \
-    xxd -g0 -c1; \
+    ${0} parse_response; \
   }
   # -vvvv \
   # OPENSSL:${host}:443,ignoreeof,crnl \
+
+elif [[ "$1" == "parse_response" ]];then shift
+  xxd -g0 -c1 
+
+
+# 00000000: 8a  .
+# 00000001: 07  .
+# 00000002: 68  h
+# 00000003: 65  e
+# 00000004: 6c  l
+# 00000005: 6c  l
+# 00000006: 6f  o
+# 00000007: 0a  .
+# 00000000: 8907 6865 6c6c 6f0a 0d                   ..hello..
+# 23:11 send from pipe /tmp/tmp.up60MAhIlx:
+# 00000008: 88  .
+# 00000009: 02  .
+# 0000000a: 03  .
+# 0000000b: ea  .
+
 
 elif [[ "$1" == "print_websocket_request_headers" ]];then shift
   host="$1"; shift
