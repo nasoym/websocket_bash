@@ -88,32 +88,35 @@ elif [[ "$1" == "main" ]];then shift
   | socat STDIO OPENSSL:${host}:443,crnl \
   | { \
     ${0} parse_response_headers; \
-    echo -en "\x81\x07hello\n" >> ${ws_pipe}; \
     ${0} parse_response ${ws_pipe}; \
   }
+    # echo -n "hello\n" >> ${ws_pipe}; \
   # -vvvv \
   # OPENSSL:${host}:443,ignoreeof,crnl \
 
 elif [[ "$1" == "parse_response" ]];then shift
   file="$1"; shift
-  # xxd -ps -g0 -c1 
-  ${stdbuf_cmd} -i0 -o0 -e0 xxd -ps -c1 \
+  # xxd -g0 -c1 
+  ${stdbuf_cmd} -i0 -o0 -e0 xxd -u -ps -c1 \
   | while read byte; do
     # echo "${byte} --"
     if [[ "${byte}" == "81" ]];then
       log "got text"
       read count
-      # echo "count ${count}"
-      read -N $(( (${count}-1) * 3 )) content
+      log "count: ${count}" 
+      count="$(echo "ibase=16;${count}" | bc)"
+      log "count: ${count}" 
+      read -N $(( ${count} * 3 )) content
       # echo "content ${content}"
       # echo "============="
       echo -n "${content}" | xxd -ps -r 
+      echo
       # echo "============="
     elif [[ "${byte}" == "89" ]];then
       log "got ping"
       read zero
-      log "send pong"
-      echo -en "\x8A\x00" >> ${file}
+      # log "send pong"
+      # echo -en "\x8A\x00" >> ${file}
     elif [[ "${byte}" == "8a" ]];then
       log "got pong"
       read zero
@@ -125,6 +128,7 @@ elif [[ "$1" == "parse_response" ]];then shift
       echo "${byte} --"
     fi
   done
+
   # xxd -ps -c1 \
   # ${stdbuf_cmd} -i0 -o0 -e0 xxd -ps -c1 \
   # | sed -u -e '/^80$/d' -e '/^00$/d' -e 's/^ff$/0a/g' \
@@ -170,7 +174,10 @@ elif [[ "$1" == "send_message_from_pipe" ]];then shift
   if [[ -p "${file}" ]];then
     while true; do
       log "send from pipe ${file}: "
-      cat ${file} | tee >(xxd >&2)
+      input="$(cat ${file})"
+      input_length="${#input}"
+      input_length="$(printf "%02d" "$(( ${input_length} ))")"
+      echo -en "\x81\x${input_length}${input}" | tee >(xxd >&2)
     done
   fi
 
