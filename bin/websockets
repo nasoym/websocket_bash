@@ -100,18 +100,43 @@ elif [[ "$1" == "parse_response" ]];then shift
   ${stdbuf_cmd} -i0 -o0 -e0 xxd -u -ps -c1 \
   | while read byte; do
     # echo "${byte} --"
+    # log "got byte: ${byte} : $(echo -n "${byte}" | xxd -ps -r)"
     if [[ "${byte}" == "81" ]];then
       log "got text"
       read count
-      log "count: ${count}" 
+      # log "count: ${count}" 
       count="$(echo "ibase=16;${count}" | bc)"
-      log "count: ${count}" 
+      if [[ "${count}" -eq "126" ]];then
+        read -N $(( 2 * 3 )) count
+        count="$( echo -n "${count}" | tr -d "\n")"
+        count="$(echo "ibase=16;${count}" | bc)"
+        log "count: 126 !: ${count}" 
+      elif [[ "${count}" -eq "127" ]];then
+        read -N $(( 8 * 3 )) count
+        count="$( echo -n "${count}" | tr -d "\n")"
+        count="$(echo "ibase=16;${count}" | bc)"
+        log "count: 127 !: ${count}" 
+      elif [[ "${count}" -lt "126" ]];then
+        :
+        # log "count: < 126 !" 
+      else
+        :
+      fi
+      # log "count: ${count}" 
+
+
+      # chars=""
+      # for (( i=1; i<=count; i++ )); do
+      #   read char
+      #   chars+="${char}"
+      #   # log "got char ${i}: ${char} $(echo -n "${char}" | xxd -ps -r)"
+      # done
+      # log "got chars: ${chars}"
+      # echo -n "${chars}" | xxd -ps -r 
+
       read -N $(( ${count} * 3 )) content
-      # echo "content ${content}"
-      # echo "============="
       echo -n "${content}" | xxd -ps -r 
       echo
-      # echo "============="
     elif [[ "${byte}" == "89" ]];then
       log "got ping"
       read zero
