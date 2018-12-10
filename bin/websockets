@@ -73,7 +73,6 @@ elif [[ "$1" == "help" ]];then shift
 elif [[ "$1" == "main" ]];then shift
   trap 'close $$' INT TERM
   log "launch $$"
-
   
   ws_pipe="$(mktemp -u)"
   mkfifo ${ws_pipe}
@@ -104,7 +103,6 @@ elif [[ "$1" == "parse_response" ]];then shift
     if [[ "${byte}" == "81" ]];then
       log "got text"
       read count
-      # log "count: ${count}" 
       count="$(echo "ibase=16;${count}" | bc)"
       if [[ "${count}" -eq "126" ]];then
         read -N $(( 2 * 3 )) count
@@ -117,14 +115,11 @@ elif [[ "$1" == "parse_response" ]];then shift
         count="$(echo "ibase=16;${count}" | bc)"
         log "count: 127 !: ${count}" 
       elif [[ "${count}" -lt "126" ]];then
-        :
-        # log "count: < 126 !" 
+        log "count: < 126 ! :${count}" 
       else
         :
       fi
       # log "count: ${count}" 
-
-
       # chars=""
       # for (( i=1; i<=count; i++ )); do
       #   read char
@@ -135,13 +130,14 @@ elif [[ "$1" == "parse_response" ]];then shift
       # echo -n "${chars}" | xxd -ps -r 
 
       read -N $(( ${count} * 3 )) content
-      echo -n "${content}" | xxd -ps -r 
+      # log "got content: ${content}"
+      echo "${content}" | xxd -ps -r 
       echo
     elif [[ "${byte}" == "89" ]];then
       log "got ping"
       read zero
-      # log "send pong"
-      # echo -en "\x8A\x00" >> ${file}
+      log "send pong"
+      echo -en "\x8A\x00" >> ${file}
     elif [[ "${byte}" == "8a" ]];then
       log "got pong"
       read zero
@@ -194,15 +190,22 @@ Sec-WebSocket-Key: vdEB/U8/zHN2Xww2rbgAvg==
 Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
 " 
 
+elif [[ "$1" == "transform_message" ]];then shift
+  input="$(cat -)"
+  echo "${input}" | xxd >&2
+  # input_length="${#input}"
+  # input_length="$( printf "%s" "${input}" | wc -c )"
+  # input_length="$( echo -en "${input}" | wc -c )"
+  input_length="$( echo "${input}" | wc -c )"
+  input_length="$(printf "%02d" "$(( ${input_length} ))")"
+  echo -en "\x81\x${input_length}${input}" 
+
 elif [[ "$1" == "send_message_from_pipe" ]];then shift
   file="$1"; shift
   if [[ -p "${file}" ]];then
     while true; do
       log "send from pipe ${file}: "
-      input="$(cat ${file})"
-      input_length="${#input}"
-      input_length="$(printf "%02d" "$(( ${input_length} ))")"
-      echo -en "\x81\x${input_length}${input}" | tee >(xxd >&2)
+      cat ${file} | tee >(xxd >&2)
     done
   fi
 
