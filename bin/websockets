@@ -108,14 +108,14 @@ elif [[ "$1" == "parse_response" ]];then shift
         read -N $(( 2 * 3 )) count
         count="$( echo -n "${count}" | tr -d "\n")"
         count="$(echo "ibase=16;${count}" | bc)"
-        log "count: 126 !: ${count}" 
+        log "count: =126: ${count}" 
       elif [[ "${count}" -eq "127" ]];then
         read -N $(( 8 * 3 )) count
         count="$( echo -n "${count}" | tr -d "\n")"
         count="$(echo "ibase=16;${count}" | bc)"
-        log "count: 127 !: ${count}" 
+        log "count: =127: ${count}" 
       elif [[ "${count}" -lt "126" ]];then
-        log "count: < 126 ! :${count}" 
+        log "count: <126: ${count}" 
       else
         :
       fi
@@ -196,15 +196,22 @@ elif [[ "$1" == "transform_message" ]];then shift
   # input_length="${#input}"
   # input_length="$( printf "%s" "${input}" | wc -c )"
   # input_length="$( echo -en "${input}" | wc -c )"
-  input_length="$( echo "${input}" | wc -c )"
-  input_length="$(printf "%02d" "$(( ${input_length} ))")"
+  input_length="$( echo -n "${input}" | wc -c )"
+  echo "length1: ${input_length}" >&2
+  # input_length="$(printf "%02d" "$(( ${input_length} ))")"
+  input_length="$(printf "%02x" "$(( ${input_length} ))")"
+  echo "length2: ${input_length}" >&2
+  # input_length="$(echo "obase=16;${input_length}" | bc)"
+  # echo "length3: ${input_length}" >&2
+
+
   echo -en "\x81\x${input_length}${input}" 
 
 elif [[ "$1" == "send_message_from_pipe" ]];then shift
   file="$1"; shift
   if [[ -p "${file}" ]];then
     while true; do
-      log "send from pipe ${file}: "
+      log "send from pipe ${file}"
       cat ${file} | tee >(xxd >&2)
     done
   fi
