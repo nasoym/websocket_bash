@@ -51,6 +51,7 @@ while getopts "a:h?" options; do case $options in
 esac; done; shift $((OPTIND - 1))
 
 : ${host:="echo.websocket.org"}
+: ${host_port:="443"}
 : ${path:="/"}
 
   if which timeout >/dev/null ; then
@@ -84,7 +85,7 @@ elif [[ "$1" == "main" ]];then shift
     ${0} print_websocket_request_headers ${host} ${path}; \
     ${0} send_message_from_pipe ${ws_pipe}; \
   } \
-  | socat STDIO OPENSSL:${host}:443,crnl \
+  | socat STDIO TCP:${host}:${host_port},crnl \
   | { \
     ${0} parse_response_headers; \
     ${0} parse_response ${ws_pipe}; \
@@ -92,6 +93,28 @@ elif [[ "$1" == "main" ]];then shift
     # echo -n "hello\n" >> ${ws_pipe}; \
   # -vvvv \
   # OPENSSL:${host}:443,ignoreeof,crnl \
+  # | socat STDIO OPENSSL:${host}:${host_port},crnl \
+
+elif [[ "$1" == "server" ]];then shift
+  socat TCP-LISTEN:9999,crlf,reuseaddr,fork EXEC:"${0} server_response"
+
+elif [[ "$1" == "server_response" ]];then shift
+  echo "\
+HTTP/1.1 101 Web Socket Protocol Handshake
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: authorization
+Access-Control-Allow-Headers: x-websocket-extensions
+Access-Control-Allow-Headers: x-websocket-version
+Access-Control-Allow-Headers: x-websocket-protocol
+Access-Control-Allow-Origin: http://www.websocket.org
+Connection: Upgrade
+Date: Wed, 17 Oct 2018 19:41:03 GMT
+Sec-WebSocket-Accept: Qw5667ia0q27TEnIGy5uiLiNWHg=
+Server: Kaazing Gateway
+Upgrade: websocket
+
+foo
+"
 
 elif [[ "$1" == "parse_response" ]];then shift
   file="$1"; shift
