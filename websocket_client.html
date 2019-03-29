@@ -11,9 +11,9 @@
     if (document.readyState === "complete") {
       // var ws = new WebSocket('ws://localhost:8765');
       // var ws = new WebSocket('wss://echo.websocket.org');
-      var ws = new WebSocket('ws://echo.websocket.org');
+      // var ws = new WebSocket('ws://echo.websocket.org');
       // var ws = new WebSocket('wss://localhost:9999');
-      // var ws = new WebSocket('ws://localhost:9999');
+      var ws = new WebSocket('ws://localhost:9999');
       ws.addEventListener('open', function (event) {
           console.log('ws connection open', event);
           console.log('ws connection open', event.data);
